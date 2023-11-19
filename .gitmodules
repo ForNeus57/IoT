@@ -1,0 +1,3 @@
+[submodule "src/android/repo"]
+	path = src/android/repo
+	url = https://github.com/ForNeus57/AndroidIoT.git
