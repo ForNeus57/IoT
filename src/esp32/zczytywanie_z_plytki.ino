@@ -316,6 +316,7 @@ void handleDoReadingRequest(String message) {
   else {
     Serial.println("Bad doReadValue request: " + doReadingMessage);
     sendBt(String("{\"message\":\"Bad request\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
+    return;
   }
 
   Serial.println("\n\nSuccessfully fulfilled change state request\n\n");
