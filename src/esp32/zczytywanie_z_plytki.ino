@@ -205,6 +205,10 @@ void sendReading() {
   bt.begin("Fotorezystor");  // włącz bluetooth po tym jak wyłączyłeś
 }
 
+void sendBt(String msg) {
+  bt.println(encryptString(msg));
+}
+
 //Sprawdzanie czy ktoś chce się połączyć przez bluetooth
 void readBluetooth() {
   int i = 0;
@@ -222,7 +226,7 @@ void readBluetooth() {
     message += cmd;
   } while (cmd != bluetoothEOL);
 
-  handleRequest(message);
+  handleRequest(decrypt(message));
 }
 
 // Rozpoznaj rozkaz i wykonaj jeśli prawidłowy
@@ -234,12 +238,12 @@ void handleRequest(String message) {
   else if (message.indexOf("doReadValue") > 0)  //rozkaz zmiany stanu odczytywania (rozparowanie)
     handleDoReadingRequest(message);
   else
-    bt.println(String("{\"message\":\"Bad request\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
+    sendBt(String("{\"message\":\"Bad request\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
 }
 
 // zajmuje się requestem o zapisanie hasła i ssid do połączenia się z WiFi
 void handleWiFiRequest(String message) {
-  //{"device_id":"us","username":"us","ssid":"ss","password":"pa"}
+  //{"device_id":"us","username":"us","ssid":"ss","password":"pa","key":""}
   String s = message;
 
   String deviceIdTmp = s.substring(s.indexOf(":") + 2, s.indexOf(",") - 1);
@@ -268,30 +272,33 @@ void handleWiFiRequest(String message) {
   // sprawdź czy się połączy i odpowiednio odpowiedz telefonowi
   if (!addUser(user)) {
     Serial.println("\n\nERROR: cannot add two users.\n\n");
-    bt.println(String("{\"message\":\"Device already has an owner\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
+    sendBt(String("{\"message\":\"Device already has an owner\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
     return;
   }
 
   if (!tryToConnectToWifi()) {
-    bt.println(String("{\"message\":\"Bad password\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
+    sendBt(String("{\"message\":\"Bad password\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
     return;
   }
 
   doReadValue = true;
 
-  bt.println(String("{\"message\":\"Ok\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
+  sendBt(String("{\"message\":\"Ok\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
 }
 
 //zajmuje się requestem o zaprzestanie/rozpoczęcie odczytów i wysyłanie na AWS
 void handleDoReadingRequest(String message) {
-  //{"username":"","doReadValue":true}
+  //{"username":"","doReadValue":true,"key":""}
   String s = message;
 
   String user = s.substring(s.indexOf(":") + 2, s.indexOf(",") - 1);
-  if (!addUser(user))
+  if (!addUser(user)) {
+    Serial.println("\n\nERROR: cannot add two users.\n\n");
+    sendBt(String("{\"message\":\"Device already has an owner\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
     return;
-  s = s.substring(s.indexOf(",") + 1, s.length());
+  }
 
+  s = s.substring(s.indexOf(",") + 1, s.length());
   String doReadingMessage = s.substring(s.indexOf(":") + 1, s.indexOf(","));
 
   s = s.substring(s.indexOf(",") + 1, s.length());
@@ -302,7 +309,7 @@ void handleDoReadingRequest(String message) {
     return;
   }
 
-  if (doReadingMessage == "false") { // rozparuj urządzenia i przestań czytać z fotorezystora
+  if (doReadingMessage == "false") {  // rozparuj urządzenia i przestań czytać z fotorezystora
     doReadValue = false;
     deviceId = "";
     users[0] = "";
@@ -310,7 +317,7 @@ void handleDoReadingRequest(String message) {
     doReadValue = true;
   else
     Serial.println("Bad doReadValue request: " + doReadingMessage);
-  bt.println(String("{\"message\":\"Ok\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
+  sendBt(String("{\"message\":\"Ok\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
 }
 
 // funkcja próbuje się połączyć z wifi, zwraca true jak się uda i false jak się nie uda
@@ -397,6 +404,7 @@ String encodeToSHA(long valueToEncode) {
   return msg;
 }
 
+//dodaje klucz sha wysłany przez usera, w momencie wywołania mamu pewność, ze nie został użyty
 void addExternalSHA(String sha) {
   Serial.println(String("added hash: ") + sha);
   hashHistory.push_back(sha);
