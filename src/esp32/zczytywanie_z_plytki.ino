@@ -3,11 +3,8 @@
 #include <PubSubClient.h>      // do połączenia z MQTT
 #include <string>              // do wszystkiego co wyżej
 #include <bits/stdc++.h>       // do wektora do zabezpieczenia przed wysyłaniem 2 razy tego samego pakietu
-// #include <Crypto.h>            // do niczego, wycięte
-// #include <SHA256.h>            // do niczego, wycięte
-// #include <sstream>             // do niczego, wycięte
-#include <stack>     // do zamiany longa na string (tak trzeba to było implementować)
-#include <AESLib.h>  // do bezpiecznej komunikacji z telefonem
+#include <stack>               // do zamiany longa na string (tak trzeba to było implementować)
+#include <AESLib.h>            // do bezpiecznej komunikacji z telefonem
 
 #define photoresistorPin 34            // pin płytki z którego zczytujemu dane
 #define bluetoothEOL 10                // znak End Of Line w trakcie łączenia się przez bluetooth, definiowany przez standard
@@ -112,11 +109,11 @@ rqXRfboQnoZsG4q5WTP468SQvvG5
 -----END CERTIFICATE-----
 )EOF";
 
-void msgReceived(char* topic, byte* payload, unsigned int len);  // metoda do odbierania danych z AWS przy wysłaniu requestu, zdefiniowana niżej
+void msgReceived(char* topic, byte* payload, unsigned int len){};  // metoda do odbierania danych z AWS przy wysłaniu requestu, nie użyta, potrzebna do utworzenia klienta MQTT
 
 PubSubClient pubSubClient(host, 8883, msgReceived, wifiClient);  // klient do łączenia się z MQTT
 
-// ta funkcja inicjalizuje płytkę - nazwa narzucona przez standard
+// ta funkcja inicjalizuje płytkę za kazdym razem gdy jest włączona - narzucona przez Arduino
 void setup() {
   // pinMode(photoresistorPin, ANALOG);
   Serial.begin(9600);  // do odczytnia logów z płytki
@@ -129,7 +126,7 @@ void setup() {
   wifiClient.setPrivateKey(private_pem_key);
 }
 
-//ta metoda wykonuje się w kółko po zainicjalizowaniu płytki - narzucona przez standard
+//ta metoda wykonuje się w kółko po zainicjalizowaniu płytki - narzucona przez Arduino
 void loop() {
   maintenance();
 
@@ -138,10 +135,6 @@ void loop() {
   readValue();
 
   readBluetooth();
-
-  // String encrypted = encryptString(String("1234567890                                 a"));
-  // String decrypted = decrypt(encrypted);
-  // Serial.println(String("Decrypted: ") + decrypted);
 }
 
 // proste akcje które muszą się wykonać co każdą iterację pętli
@@ -152,8 +145,10 @@ void maintenance() {
   delay(1000);
 
   readingTimeCounter += 1;                                  // pilnuje wysłania odczytu do AWS
-  if (readingTimeCounter > readingSendPeriodInSeconds + 1)  //prevent int overflow
+  if (readingTimeCounter > readingSendPeriodInSeconds + 1)  // prevent int overflow
     readingTimeCounter = 1;
+
+  Serial.println("Starting new loop...");
 }
 
 //Odczytuje wartość z fotorezystora
@@ -179,6 +174,7 @@ void sendReading() {
     Serial.println("\n\nERROR: Could not send reading to AWS, deviceId is null\n\n");
     return;
   }
+
   bt.end();  // żeby wysłać trzeba zamknąć bluetooth, inaczej nie działa
   Serial.println("Sending reading request to AWS...");
 
@@ -193,7 +189,6 @@ void sendReading() {
       i++;
     }
     Serial.println(" connected");
-    // pubSubClient.subscribe("write");
   }
   pubSubClient.loop();
 
@@ -205,8 +200,9 @@ void sendReading() {
   bt.begin("Fotorezystor");  // włącz bluetooth po tym jak wyłączyłeś
 }
 
+// funkcja opakowująca wysłanie przez bluetooth
 void sendBt(String msg) {
-  bt.println(encryptString(msg));
+  bt.println(encrypt(msg));  // enkrypcja przez AES128, po drugiej stronie wymagane są taki sam klucz symetryczny (do odkodowania)
 }
 
 //Sprawdzanie czy ktoś chce się połączyć przez bluetooth
@@ -221,7 +217,7 @@ void readBluetooth() {
   String message = "";
   char cmd;
 
-  do {
+  do {  // zczytuj wiadomość dopóki nie napotkasz znaku końca transmisji (globalna zmienna bluetoothEOL na początku pliku)
     cmd = bt.read();
     message += cmd;
   } while (cmd != bluetoothEOL);
@@ -231,11 +227,11 @@ void readBluetooth() {
 
 // Rozpoznaj rozkaz i wykonaj jeśli prawidłowy
 void handleRequest(String message) {
-  Serial.println("--------------" + message);
+  Serial.println("-------------- Received request:" + message);
 
   if (message.indexOf("ssid") > 0 && message.indexOf("password") > 0)  //rozkaz podania hasła do WiFi
     handleWiFiRequest(message);
-  else if (message.indexOf("doReadValue") > 0)  //rozkaz zmiany stanu odczytywania (rozparowanie)
+  else if (message.indexOf("doReadValue") > 0)  //rozkaz zmiany stanu odczytywania (rozparowanie urządzenia)
     handleDoReadingRequest(message);
   else
     sendBt(String("{\"message\":\"Bad request\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
@@ -277,12 +273,14 @@ void handleWiFiRequest(String message) {
   }
 
   if (!tryToConnectToWifi()) {
+    Serial.println("\n\nERROR: received ssid and password are incorrect.\n\n");
     sendBt(String("{\"message\":\"Bad password\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
     return;
   }
 
-  doReadValue = true;
+  doReadValue = true;  // rozpocznij odczyty i wysyłanie do AWS
 
+  Serial.println("\n\nSuccessfully changed ssid and password\n\n");
   sendBt(String("{\"message\":\"Ok\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
 }
 
@@ -313,10 +311,14 @@ void handleDoReadingRequest(String message) {
     doReadValue = false;
     deviceId = "";
     users[0] = "";
-  } else if (doReadingMessage == "true")
+  } else if (doReadingMessage == "true")  // rozpoczęcie teoretycznie zaczynamy w momencie podania dobrego hasła, więc ten if nie powinien się nigdy wykonać, stary koncept
     doReadValue = true;
-  else
+  else {
     Serial.println("Bad doReadValue request: " + doReadingMessage);
+    sendBt(String("{\"message\":\"Bad request\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
+  }
+
+  Serial.println("\n\nSuccessfully fulfilled change state request\n\n");
   sendBt(String("{\"message\":\"Ok\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
 }
 
@@ -341,7 +343,7 @@ bool connectToWiFi() {
 }
 
 // funkcja enkryptuje dany string dzięki AES128 (padding CBC) - użyte do bezpiecznej komunikacji z telefonem
-String encryptString(String message) {
+String encrypt(String message) {
   AESLib aesLib;
   aesLib.set_paddingmode((paddingMode)0);
 
@@ -351,13 +353,10 @@ String encryptString(String message) {
   byte aes_key[] = { 0x2B, 0x7E, 0x15, 0x16, 0x28, 0xAE, 0xD2, 0xA6, 0xAB, 0xF7, 0x15, 0x88, 0x09, 0xCF, 0x4F, 0x3C };
   byte aes_iv[] = { 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA };
 
-  Serial.println("Calling encrypt (string)...");
-
-  // int cipherlength = aesLib.encrypt((byte*)msg, msgLen, (byte*)ciphertext, aes_key, sizeof(aes_key), aes_iv);
+  Serial.println("Calling encrypt...");
 
   int cipherlength = aesLib.encrypt64((byte*)msg, msgLen, ciphertext, aes_key, sizeof(aes_key), aes_iv);
-  // uint16_t encrypt(byte input[], uint16_t input_length, char * output, byte key[],int bits, byte my_iv[]);
-  Serial.println(ciphertext);
+
   return String(ciphertext);
 }
 
@@ -373,7 +372,7 @@ String decrypt(String msg) {
   char out[2 * 129 * 2] = { 0 };
   byte aes_key[] = { 0x2B, 0x7E, 0x15, 0x16, 0x28, 0xAE, 0xD2, 0xA6, 0xAB, 0xF7, 0x15, 0x88, 0x09, 0xCF, 0x4F, 0x3C };
   byte aes_iv[] = { 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA };
-  Serial.println("Calling decrypt (string)...");
+  Serial.println("Calling decrypt...");
 
   int decryptLen = aesLib.decrypt64(char_array, msgLen, (byte*)out, aes_key, sizeof(aes_key), aes_iv);
 
@@ -399,12 +398,14 @@ bool tryToConnectToWifi() {
   return false;
 }
 
+// kodzik SHA do wysłania do telefonu w celu zapobiegnięcia replay attack (wysłanie tego samego pakietu 2 razy)
 String encodeToSHA(long valueToEncode) {
-  String msg = LongToString(valueToEncode);
+  String valueAsString = LongToString(valueToEncode);
+  String msg = encrypt(valueAsString);
   return msg;
 }
 
-//dodaje klucz sha wysłany przez usera, w momencie wywołania mamu pewność, ze nie został użyty
+//dodaje klucz sha wysłany przez usera, w momencie wywołania funkcji mamy pewność, ze nie został użyty
 void addExternalSHA(String sha) {
   Serial.println(String("added hash: ") + sha);
   hashHistory.push_back(sha);
@@ -412,7 +413,6 @@ void addExternalSHA(String sha) {
 
 // funkcja sprawdza czy dany klucz wysłany w requescie z telefonu został już użyty
 bool hashIsUsed(String sha) {
-
   for (String i : hashHistory) {
     if (i == sha)
       return true;
@@ -452,8 +452,4 @@ String LongToString(long long_num) {
   }
 
   return signValue + long_to_string;
-}
-
-// zapomnij że istnieje, było potrzebne do utworzenia klienta do MQTT
-void msgReceived(char* topic, byte* payload, unsigned int length) {
 }
