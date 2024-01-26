@@ -7,16 +7,16 @@
 #include <AESLib.h>            // do bezpiecznej komunikacji z telefonem
 
 #define photoresistorPin 34            // pin płytki z którego zczytujemu dane
-#define bluetoothEOL 10                // znak End Of Line w trakcie łączenia się przez bluetooth, definiowany przez standard
+#define bluetoothEOL 10                // znak End Of Line w trakcie łączenia się przez bluetooth
 #define readingSendPeriodInSeconds 20  // wyślij odczyt do aws co każde X pętli (~ sekund)
 
 // Bezpieczeństwo połączenia:
-// Bluetooth - Secure simple pairing, hashe trzymane w pamięci przeciwko wysłaniu 2 razy tego samego pakietu, szyfrowanie wiadomości
-// wifi - klucze
+// Bluetooth - Secure simple pairing, hashe trzymane w pamięci przeciwko wysłaniu 2 razy tego samego pakietu, szyfrowanie wiadomości AES128
+// wifi - klucze AWS
 
 String ssid = "";
 String pwd = "";
-String users[1];                  // userowie trzymani w pamięci, przypisani do płytki. Teoretycznie nie użyte
+String users[1];                  // userowie trzymani w pamięci, przypisani do płytki
 bool doReadValue = false;         // czy zczytywać dane z fotorezystora, zmieniana przez usera
 int readingTimeCounter = 0;       // czuwa nad tym, czy trzeba w danej iteracji pętli wysłać odczyt do aws
 long randomV = 1L;                // wartość zmieniana w każdej iteracji pętli po to, aby mogła być zhashowana i wysłana do telefonu (hashe trzymane w pamięci przeciwko wysłaniu 2 razy tego samego pakietu)
@@ -115,7 +115,6 @@ PubSubClient pubSubClient(host, 8883, msgReceived, wifiClient);  // klient do ł
 
 // ta funkcja inicjalizuje płytkę za kazdym razem gdy jest włączona - narzucona przez Arduino
 void setup() {
-  // pinMode(photoresistorPin, ANALOG);
   Serial.begin(9600);  // do odczytnia logów z płytki
   delay(50);
   bt.enableSSP();            // Secure Simple Pairing - protokół bezpieczeństwa da bluetooth
@@ -234,7 +233,7 @@ void handleRequest(String message) {
   else if (message.indexOf("doReadValue") > 0)  //rozkaz zmiany stanu odczytywania (rozparowanie urządzenia)
     handleDoReadingRequest(message);
   else
-    sendBt(String("{\"message\":\"Bad request\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
+    sendBt(String("{\"message\":\"Bad request\",\"key\":\"") + encodeToKey(randomV) + String("\"}"));
 }
 
 // zajmuje się requestem o zapisanie hasła i ssid do połączenia się z WiFi
@@ -257,31 +256,31 @@ void handleWiFiRequest(String message) {
   String key = s.substring(s.indexOf(":") + 2, s.indexOf("}") - 1);
 
   if (!hashIsViable(key)) {  // jeśli ta wiadomość (pakiet) została już wysłana, to nie odpowiadaj
-    Serial.println("Hash already used! Detected replay attack!");
+    Serial.println("\n\nHash already used! Detected replay attack!\n\n");
     return;
   }
 
-  deviceId = deviceIdTmp;
+  if (!addUser(user)) {
+    Serial.println("\n\nERROR: cannot add two users.\n\n");
+    sendBt(String("{\"message\":\"Device already has an owner\",\"key\":\"") + encodeToKey(randomV) + String("\"}"));
+    return;
+  }
+
   pwd = pwdTemp;
   ssid = ssidTemp;
 
   // sprawdź czy się połączy i odpowiednio odpowiedz telefonowi
-  if (!addUser(user)) {
-    Serial.println("\n\nERROR: cannot add two users.\n\n");
-    sendBt(String("{\"message\":\"Device already has an owner\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
-    return;
-  }
-
   if (!tryToConnectToWifi()) {
     Serial.println("\n\nERROR: received ssid and password are incorrect.\n\n");
-    sendBt(String("{\"message\":\"Bad password\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
+    sendBt(String("{\"message\":\"Bad password\",\"key\":\"") + encodeToKey(randomV) + String("\"}"));
     return;
   }
 
+  deviceId = deviceIdTmp;
   doReadValue = true;  // rozpocznij odczyty i wysyłanie do AWS
 
   Serial.println("\n\nSuccessfully changed ssid and password\n\n");
-  sendBt(String("{\"message\":\"Ok\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
+  sendBt(String("{\"message\":\"Ok\",\"key\":\"") + encodeToKey(randomV) + String("\"}"));
 }
 
 //zajmuje się requestem o zaprzestanie/rozpoczęcie odczytów i wysyłanie na AWS
@@ -292,7 +291,7 @@ void handleDoReadingRequest(String message) {
   String user = s.substring(s.indexOf(":") + 2, s.indexOf(",") - 1);
   if (!addUser(user)) {
     Serial.println("\n\nERROR: cannot add two users.\n\n");
-    sendBt(String("{\"message\":\"Device already has an owner\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
+    sendBt(String("{\"message\":\"Device already has an owner\",\"key\":\"") + encodeToKey(randomV) + String("\"}"));
     return;
   }
 
@@ -311,16 +310,18 @@ void handleDoReadingRequest(String message) {
     doReadValue = false;
     deviceId = "";
     users[0] = "";
+    pwd = "";
+    ssid = "";
   } else if (doReadingMessage == "true")  // rozpoczęcie teoretycznie zaczynamy w momencie podania dobrego hasła, więc ten if nie powinien się nigdy wykonać, stary koncept
     doReadValue = true;
   else {
     Serial.println("Bad doReadValue request: " + doReadingMessage);
-    sendBt(String("{\"message\":\"Bad request\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
+    sendBt(String("{\"message\":\"Bad request\",\"key\":\"") + encodeToKey(randomV) + String("\"}"));
     return;
   }
 
   Serial.println("\n\nSuccessfully fulfilled change state request\n\n");
-  sendBt(String("{\"message\":\"Ok\",\"key\":\"") + encodeToSHA(randomV) + String("\"}"));
+  sendBt(String("{\"message\":\"Ok\",\"key\":\"") + encodeToKey(randomV) + String("\"}"));
 }
 
 // funkcja próbuje się połączyć z wifi, zwraca true jak się uda i false jak się nie uda
@@ -400,14 +401,14 @@ bool tryToConnectToWifi() {
 }
 
 // kodzik SHA do wysłania do telefonu w celu zapobiegnięcia replay attack (wysłanie tego samego pakietu 2 razy)
-String encodeToSHA(long valueToEncode) {
+String encodeToKey(long valueToEncode) {
   String valueAsString = LongToString(valueToEncode);
   String msg = encrypt(valueAsString);
   return msg;
 }
 
-//dodaje klucz sha wysłany przez usera, w momencie wywołania funkcji mamy pewność, ze nie został użyty
-void addExternalSHA(String sha) {
+//dodaje klucz wysłany przez usera, w momencie wywołania funkcji mamy pewność, ze nie został użyty
+void addExternalKey(String sha) {
   Serial.println(String("added hash: ") + sha);
   hashHistory.push_back(sha);
 }
@@ -425,7 +426,7 @@ bool hashIsUsed(String sha) {
 bool hashIsViable(String sha) {
   if (hashIsUsed(sha))
     return false;
-  addExternalSHA(sha);
+  addExternalKey(sha);
   return true;
 }
 
