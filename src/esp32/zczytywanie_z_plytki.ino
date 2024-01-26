@@ -115,7 +115,6 @@ PubSubClient pubSubClient(host, 8883, msgReceived, wifiClient);  // klient do ł
 // ta funkcja inicjalizuje płytkę za kazdym razem gdy jest włączona - narzucona przez Arduino
 void setup() {
   Serial.begin(9600);  // do odczytnia logów z płytki
-  delay(50);
   bt.enableSSP();            // Secure Simple Pairing - protokół bezpieczeństwa da bluetooth
   bt.begin("Fotorezystor");  // włącz bluetooth + nazwa urządzenia
 
