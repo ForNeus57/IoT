@@ -127,7 +127,7 @@ void setup() {
 void loop() {
   maintenance();
 
-  connectToWiFi();
+  // connectToWiFi();
 
   readValue();
 
@@ -136,7 +136,7 @@ void loop() {
 
 // proste akcje które muszą się wykonać co każdą iterację pętli
 void maintenance() {
-  wifiClient.setTimeout(15000);   // timeout dla requestów
+  wifiClient.setTimeout(60000*20);   // timeout dla requestów
   randomV = random(0, LONG_MAX);  // zmienna globalna hashowana przy wysłaniu odpowiedzi do telefonu
 
   delay(1000);
@@ -164,7 +164,7 @@ void readValue() {
 
 // wysłanie requestu z odczytem do AWS
 void sendReading() {
-  if (readingTimeCounter < readingSendPeriodInSeconds)  // wyślij odczyt tylko co X pętli ~ sekund
+  if (readingTimeCounter != readingSendPeriodInSeconds)  // wyślij odczyt tylko co X pętli ~ sekund
     return;
 
   if (deviceId.length() == 0) {  // Wysyłamy tylko jak zdefiniowane jest id płytki
@@ -190,6 +190,8 @@ void sendReading() {
   pubSubClient.loop();
 
   boolean rc = pubSubClient.publish("write", sensorData.c_str());
+  delay(1000);
+  pubSubClient.disconnect();
   Serial.print("Message published, rc=");
   Serial.print((rc ? "OK: " : "FAILED: "));
   Serial.println(sensorData);
@@ -199,17 +201,19 @@ void sendReading() {
 
 // funkcja opakowująca wysłanie przez bluetooth
 void sendBt(String msg) {
-  bt.println(encrypt(msg));  // enkrypcja przez AES128, po drugiej stronie wymagane są taki sam klucz symetryczny (do odkodowania)
+  String s = encrypt(msg);
+  bt.println(s);  // enkrypcja przez AES128, po drugiej stronie wymagane są taki sam klucz symetryczny (do odkodowania)
 }
 
 //Sprawdzanie czy ktoś chce się połączyć przez bluetooth
 void readBluetooth() {
   int i = 0;
+  Serial.print("Listening....");
   while (!bt.available() && i < 8) {
     delay(50);
     i += 1;
   }
-  if (!bt.available()) return;
+  if (!bt.available()) {Serial.println(); return;}
   Serial.println("Bluetooth device has connected succesfully!");
   String message = "";
   char cmd;
@@ -401,8 +405,7 @@ bool tryToConnectToWifi() {
 // kodzik SHA do wysłania do telefonu w celu zapobiegnięcia replay attack (wysłanie tego samego pakietu 2 razy)
 String encodeToKey(long valueToEncode) {
   String valueAsString = LongToString(valueToEncode);
-  String msg = encrypt(valueAsString);
-  return msg;
+  return valueAsString;
 }
 
 //dodaje klucz wysłany przez usera, w momencie wywołania funkcji mamy pewność, ze nie został użyty
