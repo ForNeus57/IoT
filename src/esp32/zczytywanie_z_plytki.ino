@@ -26,7 +26,6 @@ std::vector<String> hashHistory;  // historia hashy otrzymanych od telefonu
 BluetoothSerial bt;                 // klient do łączenia się przez bluetooth
 uint16_t lastReading = 0;           // ostatni odczyt z fotorezystora, zmienia się tylko gdy doReadValue==true
 WiFiClientSecure wifiClient;        // klient do połączenia się po WiFi
-String mac = "0C::B8:15:F3:79:AE";  // adres MAC urządzenia w razie gdyby był potrzebny
 String deviceId = "";               // id urządzenia dostawane od telefonu, używane do wysyłania danych do AWS
 
 const char* host = "auscx70kz24ty-ats.iot.eu-north-1.amazonaws.com";  // AWS endpoint do wysyłania odczytów
